@@ -1,0 +1,124 @@
+---
+- name: Configure EC2 instances
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - docker.io
+        state: present
+
+    - name: Install Docker Compose
+      pip:
+        name: docker-compose
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+- name: Configure firewall and security
+  hosts: all
+  become: yes
+  tasks:
+    - name: Ensure UFW is installed
+      apt:
+        name: ufw
+        state: present
+        update_cache: yes
+
+    - name: Allow SSH
+      ufw:
+        rule: allow
+        port: 22
+        proto: tcp
+
+    - name: Allow HTTP
+      ufw:
+        rule: allow
+        port: 80
+        proto: tcp
+
+    - name: Allow HTTPS
+      ufw:
+        rule: allow
+        port: 443
+        proto: tcp
+
+    - name: Allow Jenkins
+      ufw:
+        rule: allow
+        port: 8080
+        proto: tcp
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+
+- name: Configure user access
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create devops user
+      user:
+        name: devops
+        shell: /bin/bash
+        groups: sudo
+        create_home: yes
+
+    - name: Create .ssh directory for devops
+      file:
+        path: /home/devops/.ssh
+        state: directory
+        owner: devops
+        group: devops
+        mode: '0700'
+
+    - name: Generate SSH keypair for devops user
+      openssh_keypair:
+        path: /home/devops/.ssh/id_rsa
+        type: rsa
+        size: 2048
+        owner: devops
+        group: devops
+        mode: '0600'
+      register: devops_key
+
+    - name: Add public key to authorized_keys
+      authorized_key:
+        user: devops
+        state: present
+        key: "{{ devops_key.public_key }}"
+
+    - name: Set password for devops user
+      user:
+        name: devops
+        password: "{{ '1234' | password_hash('sha512') }}"
+
+    - name: Disable root SSH login
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PermitRootLogin'
+        line: 'PermitRootLogin no'
+
+    - name: Enable password authentication for SSH
+      lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^PasswordAuthentication'
+        line: 'PasswordAuthentication yes'
+
+    - name: Restart SSH to apply changes
+      service:
+        name: ssh
+        state: restarted
+
